@@ -430,8 +430,8 @@ def admit_ref_commit(downloader, dep_ref, ref: str) -> tuple[str, str | None]:
 
 def _exact_tip(url: str, ref: str, env) -> str:
     """Resolve *ref* to an exact origin branch or tag with ``git ls-remote``."""
+    from ..deps.anonymous_ref_listing import branch_and_tag_refs
     from ..deps.git_remote_ops import exact_branch_or_tag_sha, refuse_non_branch_ref
-    from ..utils.git_env import git_remote_refs
     from .git_cache import _safe_git_args, _sanitize_url
 
     where = _sanitize_url(url)
@@ -440,9 +440,7 @@ def _exact_tip(url: str, ref: str, env) -> str:
     except RuntimeError as exc:
         raise CommitNotReachableError(str(exc)) from exc
     try:
-        listing = git_remote_refs(
-            url, "refs/heads/*", "refs/tags/*", env=env, timeout=60, git_args=_safe_git_args()
-        )
+        listing = branch_and_tag_refs(url, env=env, timeout=60, git_args=_safe_git_args())
     except (subprocess.SubprocessError, OSError) as exc:
         raise _Unverified(f"git ls-remote failed for {where}", exc) from exc
     if listing.returncode != 0:
@@ -504,8 +502,8 @@ def require_reachable_commit(
             tag, or reachability cannot be verified (for example offline on
             the first install of this commit).
     """
+    from ..deps.anonymous_ref_listing import branch_and_tag_refs
     from ..deps.git_remote_ops import tag_commit_shas
-    from ..utils.git_env import git_remote_refs
     from .git_cache import _safe_git_args, _sanitize_url
 
     sha = sha.lower()
@@ -520,9 +518,7 @@ def require_reachable_commit(
         "Re-run with network access, or pin a branch or tag instead."
     )
     try:
-        listing = git_remote_refs(
-            url, "refs/heads/*", "refs/tags/*", env=env, timeout=60, git_args=_safe_git_args()
-        )
+        listing = branch_and_tag_refs(url, env=env, timeout=60, git_args=_safe_git_args())
     except (subprocess.SubprocessError, OSError) as exc:
         raise _Unverified(unverifiable, exc) from exc
     if listing.returncode != 0:
