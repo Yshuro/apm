@@ -79,6 +79,30 @@ class IncompleteCheckoutError(RuntimeError):
         self.stderr = stderr
 
 
+def _is_ref_tip(git_dir: Path, sha: str) -> bool:
+    """Whether a ref of the fresh clone *git_dir* points at *sha* (read, not run).
+
+    Only a positive answer is used (the commit is then present); anything
+    unreadable or unusual answers False and the caller asks git.
+    """
+    sha = sha.lower()
+    try:
+        packed = git_dir / "packed-refs"
+        if packed.is_file():
+            for line in packed.read_text(encoding="ascii").splitlines():
+                if line.split(" ", 1)[0].lower() == sha:
+                    return True
+        refs = git_dir / "refs"
+        if refs.is_dir():
+            for ref in refs.rglob("*"):
+                if ref.is_file() and not ref.is_symlink():
+                    if ref.read_text(encoding="ascii").strip().lower() == sha:
+                        return True
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
+    return False
+
+
 def _safe_git_args() -> list[str]:
     """Return hardening ``-c`` args prepended to every git subprocess.
 
@@ -798,6 +822,8 @@ class GitCache:
         """
         from ..utils.git_env import get_git_executable, git_subprocess_env
 
+        if _is_ref_tip(staged, sha):
+            return  # a ref of the clone names it, so the commit is present
         try:
             probe = run_git_text(
                 [

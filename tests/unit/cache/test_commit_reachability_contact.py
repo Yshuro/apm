@@ -31,3 +31,21 @@ def test_url_rewrites_are_probed_once_for_many_origins(
     assert len(probes) == 1
     assert all(contact is not None and "/o/pkg-" in contact for contact in plain)
     assert rewritten is not None and rewritten.startswith("https://mirror.example")
+
+
+def test_a_ref_tip_of_the_fresh_clone_needs_no_object_probe(tmp_path: Path) -> None:
+    from apm_cli.cache.git_cache import _is_ref_tip
+
+    packed, loose, other = "a" * 40, "b" * 40, "c" * 40
+    git_dir = tmp_path / "staged.git"
+    (git_dir / "refs" / "heads").mkdir(parents=True)
+    (git_dir / "packed-refs").write_text(
+        f"# pack-refs with: peeled fully-peeled sorted\n{packed} refs/heads/main\n",
+        encoding="ascii",
+    )
+    (git_dir / "refs" / "heads" / "dev").write_text(loose + "\n", encoding="ascii")
+
+    assert _is_ref_tip(git_dir, packed.upper())
+    assert _is_ref_tip(git_dir, loose)
+    assert not _is_ref_tip(git_dir, other)
+    assert not _is_ref_tip(tmp_path / "missing.git", packed)
