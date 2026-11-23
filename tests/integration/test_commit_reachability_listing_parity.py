@@ -17,6 +17,7 @@ import pytest
 from apm_cli.cache.commit_reachability import (
     CommitNotReachableError,
     _Unverified,
+    open_verdict_stage,
     require_reachable_commit,
 )
 from apm_cli.cache.url_normalize import cache_shard_key
@@ -28,7 +29,6 @@ pytestmark = [
     pytest.mark.promise("P-OWN-ls-remote-tag-commits", "P-OWN-git-transport-selection"),
 ]
 
-_LISTINGS = "apm_cli.deps.anonymous_ref_listing._listings"
 _IN_PROCESS = "apm_cli.deps.anonymous_ref_listing.list_refs_anonymously"
 
 
@@ -65,15 +65,17 @@ def _verdict(root: Path, url: str, sha: str, env: dict[str, str]) -> str:
 
 
 def _run(tmp_path: Path, mode: str, cases, env, monkeypatch) -> tuple[dict, dict, dict]:
-    listings: dict = {}
-    monkeypatch.setattr(_LISTINGS, listings)
     if mode == "git":
         monkeypatch.setattr(_IN_PROCESS, lambda *_a, **_k: None)
     verdicts, markers = {}, {}
+    stage = open_verdict_stage()  # one install attempt
     for name, (url, sha) in cases.items():
         root = tmp_path / mode / name
         verdicts[name] = _verdict(root, url, sha, env)
-        marker = root / "reachability" / cache_shard_key(url) / "verified" / sha
+    listings = dict(stage.listings)
+    stage.commit()
+    for name, (url, sha) in cases.items():
+        marker = tmp_path / mode / name / "reachability" / cache_shard_key(url) / "verified" / sha
         markers[name] = marker.exists()
     return verdicts, markers, listings
 

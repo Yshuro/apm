@@ -573,7 +573,6 @@ _INERT_GIT_ARG_KEYS = frozenset(
 )
 _BRANCH_AND_TAG_PATTERNS = ("refs/heads/*", "refs/tags/*")
 _listing_lock = threading.Lock()
-_listings: dict[str, object] = {}
 
 
 def _inert(git_args) -> bool:
@@ -594,25 +593,33 @@ def _listing_key(url: str, env: Mapping[str, str] | None, git_args) -> str:
     return hashlib.sha256(material.encode("utf-8", "surrogateescape")).hexdigest()
 
 
-def branch_and_tag_refs(url: str, *, env: Mapping[str, str] | None, timeout: int, git_args=()):
-    """``git ls-remote <url> refs/heads/* refs/tags/*`` once per command.
+def branch_and_tag_refs(
+    url: str,
+    *,
+    env: Mapping[str, str] | None,
+    timeout: int,
+    git_args=(),
+    memo: dict | None = None,
+):
+    """``git ls-remote <url> refs/heads/* refs/tags/*``, answered in process when possible.
 
-    The first call for a given URL, env and git args answers from the
-    in-process anonymous listing when git's request is provably identical,
-    else runs ``git ls-remote`` exactly as before; a successful answer is
-    reused for the rest of the process (one CLI command). Failures are never
-    memoized. Env and args are part of the key, so an answer obtained under
-    one credential context never answers another.
+    Answers from the in-process anonymous listing when git's request is
+    provably identical, else runs ``git ls-remote`` exactly as before. With
+    *memo* (the caller's one-attempt scope, never process-wide) a successful
+    answer is reused for the same URL, env and git args; failures are never
+    reused. Env and args are part of the key, so an answer obtained under one
+    credential context never answers another.
     """
     import subprocess
 
     from apm_cli.utils.git_env import git_remote_refs
 
     key = _listing_key(url, env, git_args)
-    with _listing_lock:
-        cached = _listings.get(key)
-    if cached is not None:
-        return cached
+    if memo is not None:
+        with _listing_lock:
+            cached = memo.get(key)
+        if cached is not None:
+            return cached
     # env=None makes git build its env from the process; only an explicit
     # env can be judged for equivalence.
     eligible = env is not None and _inert(git_args)
@@ -627,7 +634,7 @@ def branch_and_tag_refs(url: str, *, env: Mapping[str, str] | None, timeout: int
             timeout=timeout,
             git_args=git_args,
         )
-    if result.returncode == 0:
+    if memo is not None and result.returncode == 0:
         with _listing_lock:
-            _listings.setdefault(key, result)
+            memo.setdefault(key, result)
     return result

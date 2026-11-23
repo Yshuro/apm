@@ -624,17 +624,17 @@ def _git_listing(monkeypatch, *, stdout: str = f"{_B}\trefs/tags/v9\n", returnco
         return arl_subprocess.CompletedProcess(["git"], code, stdout if code == 0 else "", "x")
 
     monkeypatch.setattr(_GIT_REFS, run)
-    monkeypatch.setattr(arl, "_listings", {})
     return calls
 
 
 def test_one_listing_per_remote_per_command(monkeypatch):
+    memo: dict = {}
     _eligible(monkeypatch)
     captured = _capture_requests(monkeypatch)
     git = _git_listing(monkeypatch)
 
-    first = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS)
-    second = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS)
+    first = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS, memo=memo)
+    second = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS, memo=memo)
 
     assert first.stdout == second.stdout == f"{_A}\trefs/tags/v1\n"
     assert len(captured) == 1
@@ -642,6 +642,7 @@ def test_one_listing_per_remote_per_command(monkeypatch):
 
 
 def test_a_listing_never_answers_another_credential_context(monkeypatch):
+    memo: dict = {}
     _eligible(monkeypatch)
     captured = _capture_requests(monkeypatch)
     git = _git_listing(monkeypatch)
@@ -649,8 +650,10 @@ def test_a_listing_never_answers_another_credential_context(monkeypatch):
     authed["GIT_CONFIG_VALUE_0"] = "Authorization: Basic dG9rZW4="
     monkeypatch.setitem(arl._config_cache, tuple(sorted(authed.items())), None)
 
-    anonymous = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS)
-    credentialed = arl.branch_and_tag_refs(_URL, env=authed, timeout=60, git_args=_SAFE_ARGS)
+    anonymous = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS, memo=memo)
+    credentialed = arl.branch_and_tag_refs(
+        _URL, env=authed, timeout=60, git_args=_SAFE_ARGS, memo=memo
+    )
 
     assert anonymous.stdout == f"{_A}\trefs/tags/v1\n"
     assert credentialed.stdout == f"{_B}\trefs/tags/v9\n"
@@ -666,11 +669,12 @@ def test_a_listing_never_answers_another_credential_context(monkeypatch):
     ids=["protocol", "http", "not-config"],
 )
 def test_git_args_that_could_change_the_request_run_git(monkeypatch, git_args):
+    memo: dict = {}
     _eligible(monkeypatch)
     captured = _capture_requests(monkeypatch)
     git = _git_listing(monkeypatch)
 
-    result = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=git_args)
+    result = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=git_args, memo=memo)
 
     assert result.stdout == f"{_B}\trefs/tags/v9\n"
     assert captured == []
@@ -678,12 +682,13 @@ def test_git_args_that_could_change_the_request_run_git(monkeypatch, git_args):
 
 
 def test_a_declined_listing_runs_git_and_failures_are_not_reused(monkeypatch):
+    memo: dict = {}
     monkeypatch.setitem(arl._config_cache, (), None)
     git = _git_listing(monkeypatch, returncodes=(128, 0))
 
-    failed = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS)
-    retried = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS)
-    reused = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS)
+    failed = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS, memo=memo)
+    retried = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS, memo=memo)
+    reused = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS, memo=memo)
 
     assert (failed.returncode, retried.returncode) == (128, 0)
     assert reused.stdout == retried.stdout == f"{_B}\trefs/tags/v9\n"
@@ -691,11 +696,23 @@ def test_a_declined_listing_runs_git_and_failures_are_not_reused(monkeypatch):
 
 
 def test_the_process_env_is_left_to_git(monkeypatch):
+    memo: dict = {}
     captured = _capture_requests(monkeypatch)
     git = _git_listing(monkeypatch)
 
-    result = arl.branch_and_tag_refs(_URL, env=None, timeout=60, git_args=_SAFE_ARGS)
+    result = arl.branch_and_tag_refs(_URL, env=None, timeout=60, git_args=_SAFE_ARGS, memo=memo)
 
     assert result.stdout == f"{_B}\trefs/tags/v9\n"
     assert captured == []
     assert git[0]["env"] is None
+
+
+def test_without_an_attempt_scope_every_call_lists_afresh(monkeypatch):
+    _eligible(monkeypatch)
+    captured = _capture_requests(monkeypatch)
+
+    first = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS)
+    second = arl.branch_and_tag_refs(_URL, env={}, timeout=60, git_args=_SAFE_ARGS)
+
+    assert first.stdout == second.stdout == f"{_A}\trefs/tags/v1\n"
+    assert len(captured) == 2
